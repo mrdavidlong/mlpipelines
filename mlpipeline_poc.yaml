@@ -1,0 +1,568 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: ml-pipeline-poc-
+  annotations: {pipelines.kubeflow.org/kfp_sdk_version: 1.8.12, pipelines.kubeflow.org/pipeline_compilation_time: '2022-05-23T23:14:58.752530',
+    pipelines.kubeflow.org/pipeline_spec: '{"description": "Shows how to use ML Pipeline
+      to build a model", "inputs": [{"default": "100", "name": "message_count", "optional":
+      true, "type": "Integer"}], "name": "ML Pipeline POC"}'}
+  labels: {pipelines.kubeflow.org/kfp_sdk_version: 1.8.12}
+spec:
+  entrypoint: ml-pipeline-poc
+  templates:
+  - name: condition-1
+    inputs:
+      artifacts:
+      - {name: train-model-model}
+    dag:
+      tasks:
+      - name: deploy-model
+        template: deploy-model
+        dependencies: [package-model]
+        arguments:
+          artifacts:
+          - {name: package-model-packaged_model, from: '{{tasks.package-model.outputs.artifacts.package-model-packaged_model}}'}
+      - name: package-model
+        template: package-model
+        arguments:
+          artifacts:
+          - {name: train-model-model, from: '{{inputs.artifacts.train-model-model}}'}
+  - name: deploy-model
+    container:
+      args: [--packaged-model, /tmp/inputs/packaged_model/data, --deployed-model,
+        /tmp/outputs/deployed_model/data]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def _make_parent_dirs_and_return_path(file_path: str):
+            import os
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            return file_path
+
+        def deploy_model(packaged_model_path, deployed_model_path):
+            with open(packaged_model_path, 'r') as reader:
+                with open(deployed_model_path, 'w') as writer:
+                    while True:
+                        line = reader.readline()
+                        if line == '':
+                            break
+                        line = 'deployed model: ' + line
+                        writer.write(line)
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Deploy model', description='')
+        _parser.add_argument("--packaged-model", dest="packaged_model_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--deployed-model", dest="deployed_model_path", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = deploy_model(**_parsed_args)
+      image: python:3.7
+    inputs:
+      artifacts:
+      - {name: package-model-packaged_model, path: /tmp/inputs/packaged_model/data}
+    outputs:
+      artifacts:
+      - {name: deploy-model-deployed_model, path: /tmp/outputs/deployed_model/data}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.12
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--packaged-model", {"inputPath": "packaged_model"}, "--deployed-model",
+          {"outputPath": "deployed_model"}], "command": ["sh", "-ec", "program_path=$(mktemp)\nprintf
+          \"%s\" \"$0\" > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n",
+          "def _make_parent_dirs_and_return_path(file_path: str):\n    import os\n    os.makedirs(os.path.dirname(file_path),
+          exist_ok=True)\n    return file_path\n\ndef deploy_model(packaged_model_path,
+          deployed_model_path):\n    with open(packaged_model_path, ''r'') as reader:\n        with
+          open(deployed_model_path, ''w'') as writer:\n            while True:\n                line
+          = reader.readline()\n                if line == '''':\n                    break\n                line
+          = ''deployed model: '' + line\n                writer.write(line)\n\nimport
+          argparse\n_parser = argparse.ArgumentParser(prog=''Deploy model'', description='''')\n_parser.add_argument(\"--packaged-model\",
+          dest=\"packaged_model_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--deployed-model\",
+          dest=\"deployed_model_path\", type=_make_parent_dirs_and_return_path, required=True,
+          default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs
+          = deploy_model(**_parsed_args)\n"], "image": "python:3.7"}}, "inputs": [{"name":
+          "packaged_model", "type": "String"}], "name": "Deploy model", "outputs":
+          [{"name": "deployed_model", "type": "String"}]}', pipelines.kubeflow.org/component_ref: '{}'}
+  - name: evaluate-metric
+    container:
+      args: [--metric, /tmp/inputs/metric/data, '----output-paths', /tmp/outputs/Output/data]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def evaluate_metric(metric_path):
+            import json
+
+            accuracy = 0.0
+            with open(metric_path, 'r') as reader:
+                line = reader.readline()
+                print('evaluate_metric line: ' + line)
+                metrics = json.loads(line)
+                print('evaluate_metric metrics: ' + str(metrics))
+                accuracy = metrics['accuracy']
+                print('evaluate_metric accuracy: ' + str(accuracy))
+                f1_score = metrics['f1_score']
+                print('evaluate_metric f1_score: ' + str(f1_score))
+            return accuracy
+
+        def _serialize_float(float_value: float) -> str:
+            if isinstance(float_value, str):
+                return float_value
+            if not isinstance(float_value, (float, int)):
+                raise TypeError('Value "{}" has type "{}" instead of float.'.format(
+                    str(float_value), str(type(float_value))))
+            return str(float_value)
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Evaluate metric', description='')
+        _parser.add_argument("--metric", dest="metric_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("----output-paths", dest="_output_paths", type=str, nargs=1)
+        _parsed_args = vars(_parser.parse_args())
+        _output_files = _parsed_args.pop("_output_paths", [])
+
+        _outputs = evaluate_metric(**_parsed_args)
+
+        _outputs = [_outputs]
+
+        _output_serializers = [
+            _serialize_float,
+
+        ]
+
+        import os
+        for idx, output_file in enumerate(_output_files):
+            try:
+                os.makedirs(os.path.dirname(output_file))
+            except OSError:
+                pass
+            with open(output_file, 'w') as f:
+                f.write(_output_serializers[idx](_outputs[idx]))
+      image: python:3.7
+    inputs:
+      artifacts:
+      - {name: train-model-metrics, path: /tmp/inputs/metric/data}
+    outputs:
+      parameters:
+      - name: evaluate-metric-Output
+        valueFrom: {path: /tmp/outputs/Output/data}
+      artifacts:
+      - {name: evaluate-metric-Output, path: /tmp/outputs/Output/data}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.12
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--metric", {"inputPath": "metric"}, "----output-paths", {"outputPath":
+          "Output"}], "command": ["sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\"
+          \"$0\" > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def
+          evaluate_metric(metric_path):\n    import json\n\n    accuracy = 0.0\n    with
+          open(metric_path, ''r'') as reader:\n        line = reader.readline()\n        print(''evaluate_metric
+          line: '' + line)\n        metrics = json.loads(line)\n        print(''evaluate_metric
+          metrics: '' + str(metrics))\n        accuracy = metrics[''accuracy'']\n        print(''evaluate_metric
+          accuracy: '' + str(accuracy))\n        f1_score = metrics[''f1_score'']\n        print(''evaluate_metric
+          f1_score: '' + str(f1_score))\n    return accuracy\n\ndef _serialize_float(float_value:
+          float) -> str:\n    if isinstance(float_value, str):\n        return float_value\n    if
+          not isinstance(float_value, (float, int)):\n        raise TypeError(''Value
+          \"{}\" has type \"{}\" instead of float.''.format(\n            str(float_value),
+          str(type(float_value))))\n    return str(float_value)\n\nimport argparse\n_parser
+          = argparse.ArgumentParser(prog=''Evaluate metric'', description='''')\n_parser.add_argument(\"--metric\",
+          dest=\"metric_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\",
+          dest=\"_output_paths\", type=str, nargs=1)\n_parsed_args = vars(_parser.parse_args())\n_output_files
+          = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = evaluate_metric(**_parsed_args)\n\n_outputs
+          = [_outputs]\n\n_output_serializers = [\n    _serialize_float,\n\n]\n\nimport
+          os\nfor idx, output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n    except
+          OSError:\n        pass\n    with open(output_file, ''w'') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"],
+          "image": "python:3.7"}}, "inputs": [{"name": "metric", "type": "String"}],
+          "name": "Evaluate metric", "outputs": [{"name": "Output", "type": "Float"}]}',
+        pipelines.kubeflow.org/component_ref: '{}'}
+  - name: get-source-data
+    container:
+      args: [--message-count, '{{inputs.parameters.message_count}}', --source-data,
+        /tmp/outputs/source_data/data]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def _make_parent_dirs_and_return_path(file_path: str):
+            import os
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            return file_path
+
+        def get_source_data(message_count, source_data_path):
+            # TODO: Gets data from feature store, add random annotation, and write the data into a file
+            with open(source_data_path, 'w') as writer:
+                for i in range(0, message_count):
+                    writer.write('message ' + str(i) + '\n')
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Get source data', description='')
+        _parser.add_argument("--message-count", dest="message_count", type=int, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--source-data", dest="source_data_path", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = get_source_data(**_parsed_args)
+      image: python:3.7
+    inputs:
+      parameters:
+      - {name: message_count}
+    outputs:
+      artifacts:
+      - {name: get-source-data-source_data, path: /tmp/outputs/source_data/data}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.12
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--message-count", {"inputValue": "message_count"}, "--source-data",
+          {"outputPath": "source_data"}], "command": ["sh", "-ec", "program_path=$(mktemp)\nprintf
+          \"%s\" \"$0\" > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n",
+          "def _make_parent_dirs_and_return_path(file_path: str):\n    import os\n    os.makedirs(os.path.dirname(file_path),
+          exist_ok=True)\n    return file_path\n\ndef get_source_data(message_count,
+          source_data_path):\n    # TODO: Gets data from feature store, add random
+          annotation, and write the data into a file\n    with open(source_data_path,
+          ''w'') as writer:\n        for i in range(0, message_count):\n            writer.write(''message
+          '' + str(i) + ''\\n'')\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Get
+          source data'', description='''')\n_parser.add_argument(\"--message-count\",
+          dest=\"message_count\", type=int, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--source-data\",
+          dest=\"source_data_path\", type=_make_parent_dirs_and_return_path, required=True,
+          default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs
+          = get_source_data(**_parsed_args)\n"], "image": "python:3.7"}}, "inputs":
+          [{"name": "message_count", "type": "Integer"}], "name": "Get source data",
+          "outputs": [{"name": "source_data", "type": "String"}]}', pipelines.kubeflow.org/component_ref: '{}',
+        pipelines.kubeflow.org/arguments.parameters: '{"message_count": "{{inputs.parameters.message_count}}"}'}
+  - name: ml-pipeline-poc
+    inputs:
+      parameters:
+      - {name: message_count}
+    dag:
+      tasks:
+      - name: condition-1
+        template: condition-1
+        when: '{{tasks.evaluate-metric.outputs.parameters.evaluate-metric-Output}}
+          > 0.8'
+        dependencies: [evaluate-metric, train-model]
+        arguments:
+          artifacts:
+          - {name: train-model-model, from: '{{tasks.train-model.outputs.artifacts.train-model-model}}'}
+      - name: evaluate-metric
+        template: evaluate-metric
+        dependencies: [train-model]
+        arguments:
+          artifacts:
+          - {name: train-model-metrics, from: '{{tasks.train-model.outputs.artifacts.train-model-metrics}}'}
+      - name: get-source-data
+        template: get-source-data
+        arguments:
+          parameters:
+          - {name: message_count, value: '{{inputs.parameters.message_count}}'}
+      - name: split-data
+        template: split-data
+        dependencies: [get-source-data]
+        arguments:
+          artifacts:
+          - {name: get-source-data-source_data, from: '{{tasks.get-source-data.outputs.artifacts.get-source-data-source_data}}'}
+      - name: train-model
+        template: train-model
+        dependencies: [split-data]
+        arguments:
+          artifacts:
+          - {name: split-data-test_data, from: '{{tasks.split-data.outputs.artifacts.split-data-test_data}}'}
+          - {name: split-data-training_data, from: '{{tasks.split-data.outputs.artifacts.split-data-training_data}}'}
+          - {name: split-data-validation_data, from: '{{tasks.split-data.outputs.artifacts.split-data-validation_data}}'}
+  - name: package-model
+    container:
+      args: [--model, /tmp/inputs/model/data, --packaged-model, /tmp/outputs/packaged_model/data]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def _make_parent_dirs_and_return_path(file_path: str):
+            import os
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            return file_path
+
+        def package_model(model_path, packaged_model_path):
+            with open(model_path, 'r') as reader:
+                with open(packaged_model_path, 'w') as writer:
+                    while True:
+                        line = reader.readline()
+                        if line == '':
+                            break
+                        line = 'packaged super cool model: ' + line
+                        writer.write(line)
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Package model', description='')
+        _parser.add_argument("--model", dest="model_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--packaged-model", dest="packaged_model_path", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = package_model(**_parsed_args)
+      image: python:3.7
+    inputs:
+      artifacts:
+      - {name: train-model-model, path: /tmp/inputs/model/data}
+    outputs:
+      artifacts:
+      - {name: package-model-packaged_model, path: /tmp/outputs/packaged_model/data}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.12
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--model", {"inputPath": "model"}, "--packaged-model", {"outputPath":
+          "packaged_model"}], "command": ["sh", "-ec", "program_path=$(mktemp)\nprintf
+          \"%s\" \"$0\" > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n",
+          "def _make_parent_dirs_and_return_path(file_path: str):\n    import os\n    os.makedirs(os.path.dirname(file_path),
+          exist_ok=True)\n    return file_path\n\ndef package_model(model_path, packaged_model_path):\n    with
+          open(model_path, ''r'') as reader:\n        with open(packaged_model_path,
+          ''w'') as writer:\n            while True:\n                line = reader.readline()\n                if
+          line == '''':\n                    break\n                line = ''packaged
+          super cool model: '' + line\n                writer.write(line)\n\nimport
+          argparse\n_parser = argparse.ArgumentParser(prog=''Package model'', description='''')\n_parser.add_argument(\"--model\",
+          dest=\"model_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--packaged-model\",
+          dest=\"packaged_model_path\", type=_make_parent_dirs_and_return_path, required=True,
+          default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs
+          = package_model(**_parsed_args)\n"], "image": "python:3.7"}}, "inputs":
+          [{"name": "model", "type": "String"}], "name": "Package model", "outputs":
+          [{"name": "packaged_model", "type": "String"}]}', pipelines.kubeflow.org/component_ref: '{}'}
+  - name: split-data
+    container:
+      args: [--source-data, /tmp/inputs/source_data/data, --training-data-probability,
+        '0.7', --validation-data-probability, '0.2', --test-data-probability, '0.1',
+        --training-data, /tmp/outputs/training_data/data, --validation-data, /tmp/outputs/validation_data/data,
+        --test-data, /tmp/outputs/test_data/data]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def _make_parent_dirs_and_return_path(file_path: str):
+            import os
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            return file_path
+
+        def split_data(source_data_path, training_data_probability, validation_data_probability, test_data_probability, training_data_path, validation_data_path, test_data_path):
+            # split the data into train/validation/test
+            import random
+
+            with open(source_data_path, 'r') as reader:
+                with open(training_data_path, 'w') as training_data_writer:
+                    with open(validation_data_path, 'w') as validation_data_writer:
+                        with open(test_data_path, 'w') as test_data_writer:
+                            while True:
+                                line = reader.readline()
+                                if line == '':
+                                    break
+                                choice = random.choices(['training','validation','test'], weights=(training_data_probability, validation_data_probability, test_data_probability))
+                                if choice[0] == 'training':
+                                    training_data_writer.write(line)
+                                elif choice[0] == 'validation':
+                                    validation_data_writer.write(line)
+                                else:
+                                    test_data_writer.write(line)
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Split data', description='')
+        _parser.add_argument("--source-data", dest="source_data_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--training-data-probability", dest="training_data_probability", type=float, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--validation-data-probability", dest="validation_data_probability", type=float, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--test-data-probability", dest="test_data_probability", type=float, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--training-data", dest="training_data_path", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--validation-data", dest="validation_data_path", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--test-data", dest="test_data_path", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = split_data(**_parsed_args)
+      image: python:3.7
+    inputs:
+      artifacts:
+      - {name: get-source-data-source_data, path: /tmp/inputs/source_data/data}
+    outputs:
+      artifacts:
+      - {name: split-data-test_data, path: /tmp/outputs/test_data/data}
+      - {name: split-data-training_data, path: /tmp/outputs/training_data/data}
+      - {name: split-data-validation_data, path: /tmp/outputs/validation_data/data}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.12
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--source-data", {"inputPath": "source_data"}, "--training-data-probability",
+          {"inputValue": "training_data_probability"}, "--validation-data-probability",
+          {"inputValue": "validation_data_probability"}, "--test-data-probability",
+          {"inputValue": "test_data_probability"}, "--training-data", {"outputPath":
+          "training_data"}, "--validation-data", {"outputPath": "validation_data"},
+          "--test-data", {"outputPath": "test_data"}], "command": ["sh", "-ec", "program_path=$(mktemp)\nprintf
+          \"%s\" \"$0\" > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n",
+          "def _make_parent_dirs_and_return_path(file_path: str):\n    import os\n    os.makedirs(os.path.dirname(file_path),
+          exist_ok=True)\n    return file_path\n\ndef split_data(source_data_path,
+          training_data_probability, validation_data_probability, test_data_probability,
+          training_data_path, validation_data_path, test_data_path):\n    # split
+          the data into train/validation/test\n    import random\n\n    with open(source_data_path,
+          ''r'') as reader:\n        with open(training_data_path, ''w'') as training_data_writer:\n            with
+          open(validation_data_path, ''w'') as validation_data_writer:\n                with
+          open(test_data_path, ''w'') as test_data_writer:\n                    while
+          True:\n                        line = reader.readline()\n                        if
+          line == '''':\n                            break\n                        choice
+          = random.choices([''training'',''validation'',''test''], weights=(training_data_probability,
+          validation_data_probability, test_data_probability))\n                        if
+          choice[0] == ''training'':\n                            training_data_writer.write(line)\n                        elif
+          choice[0] == ''validation'':\n                            validation_data_writer.write(line)\n                        else:\n                            test_data_writer.write(line)\n\nimport
+          argparse\n_parser = argparse.ArgumentParser(prog=''Split data'', description='''')\n_parser.add_argument(\"--source-data\",
+          dest=\"source_data_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--training-data-probability\",
+          dest=\"training_data_probability\", type=float, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--validation-data-probability\",
+          dest=\"validation_data_probability\", type=float, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--test-data-probability\",
+          dest=\"test_data_probability\", type=float, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--training-data\",
+          dest=\"training_data_path\", type=_make_parent_dirs_and_return_path, required=True,
+          default=argparse.SUPPRESS)\n_parser.add_argument(\"--validation-data\",
+          dest=\"validation_data_path\", type=_make_parent_dirs_and_return_path, required=True,
+          default=argparse.SUPPRESS)\n_parser.add_argument(\"--test-data\", dest=\"test_data_path\",
+          type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = split_data(**_parsed_args)\n"],
+          "image": "python:3.7"}}, "inputs": [{"name": "source_data", "type": "String"},
+          {"name": "training_data_probability", "type": "Float"}, {"name": "validation_data_probability",
+          "type": "Float"}, {"name": "test_data_probability", "type": "Float"}], "name":
+          "Split data", "outputs": [{"name": "training_data", "type": "String"}, {"name":
+          "validation_data", "type": "String"}, {"name": "test_data", "type": "String"}]}',
+        pipelines.kubeflow.org/component_ref: '{}', pipelines.kubeflow.org/arguments.parameters: '{"test_data_probability":
+          "0.1", "training_data_probability": "0.7", "validation_data_probability":
+          "0.2"}'}
+  - name: train-model
+    container:
+      args: [--training-data, /tmp/inputs/training_data/data, --validation-data, /tmp/inputs/validation_data/data,
+        --test-data, /tmp/inputs/test_data/data, --model, /tmp/outputs/model/data,
+        --metrics, /tmp/outputs/metrics/data]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def _make_parent_dirs_and_return_path(file_path: str):
+            import os
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            return file_path
+
+        def train_model(training_data_path, validation_data_path, test_data_path, model_path, metrics_path):
+            import json
+
+            with open(training_data_path, 'r') as reader:
+                while True:
+                    line = reader.readline()
+                    if line == '':
+                        break
+                    print('read: ' + line);
+
+            with open(validation_data_path, 'r') as reader:
+                while True:
+                    line = reader.readline()
+                    if line == '':
+                        break
+                    print('read: ' + line);
+
+            with open(test_data_path, 'r') as reader:
+                while True:
+                    line = reader.readline()
+                    if line == '':
+                        break
+                    print('read: ' + line);
+
+            with open(model_path, 'w') as writer:
+                writer.write('This is a placeholder for model')
+
+            metrics = {
+                'accuracy': 0.9,
+                'f1_score': 1.0
+            }
+            with open(metrics_path, 'w') as f:
+                json.dump(metrics, f)
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Train model', description='')
+        _parser.add_argument("--training-data", dest="training_data_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--validation-data", dest="validation_data_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--test-data", dest="test_data_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--model", dest="model_path", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--metrics", dest="metrics_path", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = train_model(**_parsed_args)
+      image: python:3.7
+    inputs:
+      artifacts:
+      - {name: split-data-test_data, path: /tmp/inputs/test_data/data}
+      - {name: split-data-training_data, path: /tmp/inputs/training_data/data}
+      - {name: split-data-validation_data, path: /tmp/inputs/validation_data/data}
+    outputs:
+      artifacts:
+      - {name: train-model-metrics, path: /tmp/outputs/metrics/data}
+      - {name: train-model-model, path: /tmp/outputs/model/data}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.12
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--training-data", {"inputPath": "training_data"}, "--validation-data",
+          {"inputPath": "validation_data"}, "--test-data", {"inputPath": "test_data"},
+          "--model", {"outputPath": "model"}, "--metrics", {"outputPath": "metrics"}],
+          "command": ["sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\" >
+          \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def _make_parent_dirs_and_return_path(file_path:
+          str):\n    import os\n    os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return
+          file_path\n\ndef train_model(training_data_path, validation_data_path, test_data_path,
+          model_path, metrics_path):\n    import json\n\n    with open(training_data_path,
+          ''r'') as reader:\n        while True:\n            line = reader.readline()\n            if
+          line == '''':\n                break\n            print(''read: '' + line);\n\n    with
+          open(validation_data_path, ''r'') as reader:\n        while True:\n            line
+          = reader.readline()\n            if line == '''':\n                break\n            print(''read:
+          '' + line);\n\n    with open(test_data_path, ''r'') as reader:\n        while
+          True:\n            line = reader.readline()\n            if line == '''':\n                break\n            print(''read:
+          '' + line);\n\n    with open(model_path, ''w'') as writer:\n        writer.write(''This
+          is a placeholder for model'')\n\n    metrics = {\n        ''accuracy'':
+          0.9,\n        ''f1_score'': 1.0\n    }\n    with open(metrics_path, ''w'')
+          as f:\n        json.dump(metrics, f)\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Train
+          model'', description='''')\n_parser.add_argument(\"--training-data\", dest=\"training_data_path\",
+          type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--validation-data\",
+          dest=\"validation_data_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--test-data\",
+          dest=\"test_data_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--model\",
+          dest=\"model_path\", type=_make_parent_dirs_and_return_path, required=True,
+          default=argparse.SUPPRESS)\n_parser.add_argument(\"--metrics\", dest=\"metrics_path\",
+          type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = train_model(**_parsed_args)\n"],
+          "image": "python:3.7"}}, "inputs": [{"name": "training_data", "type": "String"},
+          {"name": "validation_data", "type": "String"}, {"name": "test_data", "type":
+          "String"}], "name": "Train model", "outputs": [{"name": "model", "type":
+          "String"}, {"name": "metrics", "type": "String"}]}', pipelines.kubeflow.org/component_ref: '{}'}
+  arguments:
+    parameters:
+    - {name: message_count, value: '100'}
+  serviceAccountName: pipeline-runner
